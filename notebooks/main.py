@@ -46,6 +46,18 @@ def show_mask(mask, ax, obj_id=None, random_color=True):
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
 
+    # 获取 mask 的中心点作为 ID 的显示位置
+    # 确保 mask 是二维
+    if mask.ndim > 2:
+        mask = mask.squeeze()
+    coords = np.argwhere(mask)
+    if len(coords) > 0:
+        y, x = coords.mean(axis=0).astype(int)  # 计算中心点坐标
+        ax.text(
+            x, y, str(obj_id), color='white', fontsize=6, fontweight='bold',
+            ha='center', va='center', bbox=dict(facecolor='black', alpha=0.6, boxstyle='round,pad=0.3')
+        )
+
 def img_seg(query_img, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     sam2_checkpoint = "/home/suma/PycharmProjects/sam2/checkpoints/sam2.1_hiera_large.pt"
@@ -94,7 +106,9 @@ def track(masks, video_dir, output_dir):
     ann_frame_idx = 0
 
     # 循环添加mask
-    for ann_obj_id in range(len(masks)):
+    obj_num = len(masks)
+    print('初始帧共有{}个目标。'.format(obj_num))
+    for ann_obj_id in range(obj_num):
         mask = masks[ann_obj_id]['segmentation']
         _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
             inference_state=inference_state,
