@@ -1,4 +1,5 @@
 import cv2
+import glob
 import os
 import time
 import torch
@@ -10,7 +11,7 @@ from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from sam2.build_sam import build_sam2_video_predictor
 
 
-def show_anns(anns, original_image, output_dir, borders=True):
+def show_img_mask(anns, original_image, output_dir, borders=True):
     if len(anns) == 0:
         return
 
@@ -38,7 +39,7 @@ def show_anns(anns, original_image, output_dir, borders=True):
         x1, y1, w, h = [int(item_) for item_ in bbox]  # 获取 bbox 坐标
         x2 = x1 + w
         y2 = y1 + h
-        cv2.rectangle(img_overlay, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)  # 绿色矩形框
+        cv2.rectangle(img_overlay, (x1, y1), (x2, y2), color=(0, 255, 255), thickness=2)  # 绿色矩形框
 
         # 在 bbox 左上角绘制 obj_id
         text_position = (x1, y1 - 5)  # 文本位置（bbox 上方）
@@ -78,17 +79,18 @@ def img_seg(query_img, output_dir):
     sam2_checkpoint = "/home/suma/PycharmProjects/sam2/checkpoints/sam2.1_hiera_large.pt"
     model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
     image = Image.open(query_img)
+    print(image.size)
     image = np.array(image.convert("RGB"))
     sam2 = build_sam2(model_cfg, sam2_checkpoint, device=device, apply_postprocessing=False)
     mask_generator = SAM2AutomaticMaskGenerator(
         model=sam2,
-        points_per_side=32,
+        points_per_side=64,  # 为什么由32改成64？如果不改，则exp2中的异物无法分割。
         points_per_batch=128,
         pred_iou_thresh=0.8,
         stability_score_thresh=0.9,
         stability_score_offset=0.9,
         crop_n_layers=1,
-        box_nms_thresh=0.9,
+        box_nms_thresh=0.5,  # 能够在很大程度上避免多个掩码重叠在一起的情况。
         crop_n_points_downscale_factor=2,
         min_mask_region_area=25,
         use_m2m=True
@@ -100,7 +102,7 @@ def img_seg(query_img, output_dir):
     end_time = time.time()
     print('结束分割')
     print('分割耗时时间：', end_time - start_time)
-    show_anns(masks, image, output_dir)
+    show_img_mask(masks, image, output_dir)
     return masks
 
 def track(masks, video_dir, output_dir):
@@ -118,14 +120,18 @@ def track(masks, video_dir, output_dir):
     # 循环添加mask
     obj_num = len(masks)
     print('初始帧共有{}个目标。'.format(obj_num))
+    track_obj_id = 0
     for ann_obj_id in range(obj_num):
         mask = masks[ann_obj_id]['segmentation']
-        _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
-            inference_state=inference_state,
-            frame_idx=ann_frame_idx,
-            obj_id=ann_obj_id,
-            mask=mask,
-        )
+        # 如果mask符合特定大小，就跟踪它。我们没有能力跟踪极端小的物体。再强的算法也没有这种能力。跟踪过程对于极端小的物体效果也不好。
+        if 300 < np.sum(mask) < 4000:
+            _, out_obj_ids, out_mask_logits = predictor.add_new_mask(
+                inference_state=inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=track_obj_id,
+                mask=mask,
+            )
+            track_obj_id += 1
 
     print('开始追踪')
     video_segments = {}  # video_segments contains the per-frame segmentation results
@@ -148,27 +154,44 @@ def track(masks, video_dir, output_dir):
 
     # render the segmentation results every few frames
     vis_frame_stride = 1
-    for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
+    # 循环每帧：其实就是2帧：query_frame 和 reference_frame.
+    query_obj = []  # 现场车底中的目标。第0帧。
+    reference_obj = []  # 参考帧中跟踪到的目标。第1帧。一定是首帧目标的子集，因为是跟踪的结果，不可能出现新物体。
+    for out_frame_idx in range(0, len(frame_names), vis_frame_stride):  # 遍历每帧
         output_path = os.path.join(output_dir, f'frame_{out_frame_idx:04d}.png')
         plt.figure(figsize=(6, 4))
         plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
         for out_obj_id, out_mask in video_segments[out_frame_idx].items():
             # 如果当前帧是初始帧，则绘制mask
             if out_frame_idx == 0:
+                query_obj.append(out_obj_id)
                 show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
-            elif torch.max(obj_iou_per_frame[out_obj_id][out_frame_idx]) > 0.6:
-                # 如果不是初始帧：如果一个mask的pred_iou大于0.6，则绘制该mask。
+            elif torch.max(obj_iou_per_frame[out_obj_id][out_frame_idx]) > 0.5:
+                # 如果不是初始帧：如果一个mask的pred_iou大于阈值，则绘制该mask。
+                reference_obj.append(out_obj_id)
                 show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
         plt.axis('off')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
 
+    # 计算两帧之间的目标差异。第二帧一定是首帧目标的子集，因为是跟踪的结果，不可能出现新物体。
+    diff_objs = set(query_obj) - set(reference_obj)
+    print(diff_objs)
+
 
 def main():
     # 设置图像路径
-    video_dir = '/home/suma/PycharmProjects/sam2/exp1'
+    video_dir = '/home/suma/PycharmProjects/sam2/exp2'
     query_img = os.path.join(video_dir, '00001.jpg')
-    output_dir = '/home/suma/PycharmProjects/sam2/outputs/img_seg_result'
+    output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
+
+    # 把图像缩放至(1024, 410)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
+    # 必须进行缩放，否则会爆显存。
+    original_images = sorted(glob.glob(os.path.join(video_dir, '*.jpg')))
+    for original_image_path in original_images:
+        image = Image.open(original_image_path)
+        scaled_image = image.resize((1662, 682))
+        scaled_image.save(original_image_path)
 
     # 得到图像分割的结果
     masks = img_seg(query_img, output_dir)
