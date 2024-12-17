@@ -1,39 +1,57 @@
+import cv2
 import os
 import time
 import torch
-
-import numpy as np
 import matplotlib.pyplot as plt
-
+import numpy as np
 from PIL import Image
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from sam2.build_sam import build_sam2_video_predictor
 
-def show_anns(anns, output_path, borders=True):
+
+def show_anns(anns, original_image, output_dir, borders=True):
     if len(anns) == 0:
         return
-    sorted_anns = sorted(anns, key=(lambda x: x['area']), reverse=True)
-    ax = plt.gca()
-    ax.set_autoscale_on(False)
 
-    img = np.ones((sorted_anns[0]['segmentation'].shape[0], sorted_anns[0]['segmentation'].shape[1], 4))
-    img[:, :, 3] = 0
-    for ann in sorted_anns:
-        m = ann['segmentation']
-        color_mask = np.concatenate([np.random.random(3), [0.5]])
-        img[m] = color_mask
-        if borders:
-            import cv2
-            contours, _ = cv2.findContours(m.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-            # Try to smooth contours
-            contours = [cv2.approxPolyDP(contour, epsilon=0.01, closed=True) for contour in contours]
-            cv2.drawContours(img, contours, -1, (0, 0, 1, 0.4), thickness=1)
+    # 确保原始图像是浮点类型，方便叠加处理
+    original_image = original_image.astype(np.float32) / 255.0
 
-    ax.imshow(img)
-    plt.axis('off')
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
+    # 遍历每个对象并绘制
+    for obj_id in range(len(anns)):
+        ann = anns[obj_id]
+        m = ann['segmentation']  # 二值 mask
+        bbox = ann['bbox']  # x1y1x2y2
+        img_overlay = original_image.copy()  # 复制原始图像
+
+        # 随机生成颜色掩码
+        color_mask = np.random.random(3)  # 随机 RGB 颜色
+        alpha = 0.5  # 掩码透明度
+
+        # 将 mask 叠加到图像上
+        for c in range(3):  # 针对 RGB 三个通道
+            img_overlay[:, :, c] = np.where(m,
+                                            img_overlay[:, :, c] * (1 - alpha) + color_mask[c] * alpha,
+                                            img_overlay[:, :, c])
+
+        # 绘制bbox和obj_id
+        x1, y1, w, h = [int(item_) for item_ in bbox]  # 获取 bbox 坐标
+        x2 = x1 + w
+        y2 = y1 + h
+        cv2.rectangle(img_overlay, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)  # 绿色矩形框
+
+        # 在 bbox 左上角绘制 obj_id
+        text_position = (x1, y1 - 5)  # 文本位置（bbox 上方）
+        cv2.putText(img_overlay, f"ID: {obj_id}", text_position,
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)  # 绿色文本
+
+
+        # 保存结果图像
+        output_path = f"{output_dir}/mask_{obj_id}.png"
+        img_to_save = (img_overlay * 255).astype(np.uint8)  # 恢复到 0-255 范围
+        cv2.imwrite(output_path, img_to_save)
+        print(f"Saved: {output_path}")
+
 
 def show_mask(mask, ax, obj_id=None, random_color=True):
     if random_color:
@@ -53,10 +71,7 @@ def show_mask(mask, ax, obj_id=None, random_color=True):
     coords = np.argwhere(mask)
     if len(coords) > 0:
         y, x = coords.mean(axis=0).astype(int)  # 计算中心点坐标
-        ax.text(
-            x, y, str(obj_id), color='white', fontsize=6, fontweight='bold',
-            ha='center', va='center', bbox=dict(facecolor='black', alpha=0.6, boxstyle='round,pad=0.3')
-        )
+        ax.text(x, y, str(obj_id), color='white', fontsize=4, fontweight='bold', ha='center', va='center')
 
 def img_seg(query_img, output_dir):
     os.makedirs(output_dir, exist_ok=True)
@@ -68,8 +83,8 @@ def img_seg(query_img, output_dir):
     mask_generator = SAM2AutomaticMaskGenerator(
         model=sam2,
         points_per_side=32,
-        points_per_batch=64,
-        pred_iou_thresh=0.9,
+        points_per_batch=128,
+        pred_iou_thresh=0.8,
         stability_score_thresh=0.9,
         stability_score_offset=0.9,
         crop_n_layers=1,
@@ -85,12 +100,7 @@ def img_seg(query_img, output_dir):
     end_time = time.time()
     print('结束分割')
     print('分割耗时时间：', end_time - start_time)
-
-    output_path = os.path.join(output_dir, 'segmentation_result.png')
-    plt.figure(figsize=(20, 20))
-    plt.imshow(image)
-    show_anns(masks, output_path)
-
+    show_anns(masks, image, output_dir)
     return masks
 
 def track(masks, video_dir, output_dir):
@@ -124,6 +134,16 @@ def track(masks, video_dir, output_dir):
             out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
             for i, out_obj_id in enumerate(out_obj_ids)
         }
+
+    # 获得每个mask的pred_iou
+    obj_iou_per_frame = {}
+    out_obj_ids = inference_state['obj_ids'] # list
+    for out_obj_id in out_obj_ids:  # 遍历每个物体
+        obj_iou_per_frame[out_obj_id] = {}
+        non_cond_frame_outputs = inference_state['output_dict_per_obj'][out_obj_id]['non_cond_frame_outputs']
+        for out_frame_idx, value in non_cond_frame_outputs.items():
+            ious = value['ious']
+            obj_iou_per_frame[out_obj_id][out_frame_idx] = ious
     print('追踪完成')
 
     # render the segmentation results every few frames
@@ -133,7 +153,12 @@ def track(masks, video_dir, output_dir):
         plt.figure(figsize=(6, 4))
         plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
         for out_obj_id, out_mask in video_segments[out_frame_idx].items():
-            show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
+            # 如果当前帧是初始帧，则绘制mask
+            if out_frame_idx == 0:
+                show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
+            elif torch.max(obj_iou_per_frame[out_obj_id][out_frame_idx]) > 0.6:
+                # 如果不是初始帧：如果一个mask的pred_iou大于0.6，则绘制该mask。
+                show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
         plt.axis('off')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
@@ -143,7 +168,7 @@ def main():
     # 设置图像路径
     video_dir = '/home/suma/PycharmProjects/sam2/exp1'
     query_img = os.path.join(video_dir, '00001.jpg')
-    output_dir = '/home/suma/PycharmProjects/sam2/outputs'
+    output_dir = '/home/suma/PycharmProjects/sam2/outputs/img_seg_result'
 
     # 得到图像分割的结果
     masks = img_seg(query_img, output_dir)
