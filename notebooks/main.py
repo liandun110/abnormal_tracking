@@ -74,6 +74,7 @@ def show_mask(mask, ax, obj_id=None, random_color=True):
         y, x = coords.mean(axis=0).astype(int)  # 计算中心点坐标
         ax.text(x, y, str(obj_id), color='white', fontsize=4, fontweight='bold', ha='center', va='center')
 
+
 def img_seg(query_img, output_dir):
     os.makedirs(output_dir, exist_ok=True)
     sam2_checkpoint = "/home/suma/PycharmProjects/sam2/checkpoints/sam2.1_hiera_large.pt"
@@ -93,7 +94,7 @@ def img_seg(query_img, output_dir):
         box_nms_thresh=0.5,  # 能够在很大程度上避免多个掩码重叠在一起的情况。
         crop_n_points_downscale_factor=2,
         min_mask_region_area=25,
-        use_m2m=True
+        use_m2m=False  # 改成False，时间从15秒降低至7秒，且三个实验结果全对。
     )
     print('开始分割')
 
@@ -104,6 +105,7 @@ def img_seg(query_img, output_dir):
     print('分割耗时时间：', end_time - start_time)
     show_img_mask(masks, image, output_dir)
     return masks
+
 
 def track(masks, video_dir, output_dir):
     os.makedirs(output_dir, exist_ok=True)
@@ -166,7 +168,7 @@ def track(masks, video_dir, output_dir):
             if out_frame_idx == 0:
                 query_obj.append(out_obj_id)
                 show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
-            elif torch.max(obj_iou_per_frame[out_obj_id][out_frame_idx]) > 0.5:
+            elif torch.max(obj_iou_per_frame[out_obj_id][out_frame_idx]) > 0.6:
                 # 如果不是初始帧：如果一个mask的pred_iou大于阈值，则绘制该mask。
                 reference_obj.append(out_obj_id)
                 show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
@@ -181,19 +183,21 @@ def track(masks, video_dir, output_dir):
 
 def main():
     # 设置图像路径
-    video_dir = '/home/suma/PycharmProjects/sam2/exp2'
-    query_img = os.path.join(video_dir, '00001.jpg')
+    video_dir = '/home/suma/PycharmProjects/sam2/exp3'
     output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
 
     # 把图像缩放至(1024, 410)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
     # 必须进行缩放，否则会爆显存。
-    original_images = sorted(glob.glob(os.path.join(video_dir, '*.jpg')))
+    original_images = sorted(glob.glob(os.path.join(video_dir, 'original_images/*.jpg')))
     for original_image_path in original_images:
+        image_name = original_image_path.split('/')[-1]
         image = Image.open(original_image_path)
         scaled_image = image.resize((1662, 682))
-        scaled_image.save(original_image_path)
+        save_image_path = os.path.join(video_dir, image_name)
+        scaled_image.save(save_image_path)
 
     # 得到图像分割的结果
+    query_img = os.path.join(video_dir, '00001.jpg')
     masks = img_seg(query_img, output_dir)
 
     # 跟踪
