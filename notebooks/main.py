@@ -77,7 +77,7 @@ def show_mask(mask, ax, obj_id=None, random_color=True):
 
 def img_seg(query_img, output_dir):
     os.makedirs(output_dir, exist_ok=True)
-    sam2_checkpoint = "/home/suma/PycharmProjects/sam2/checkpoints/sam2.1_hiera_large.pt"
+    sam2_checkpoint = "/home/suma/PycharmProjects/abnormal_tracking/checkpoints/sam2.1_hiera_large.pt"
     model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
     image = Image.open(query_img)
     print(image.size)
@@ -86,15 +86,16 @@ def img_seg(query_img, output_dir):
     mask_generator = SAM2AutomaticMaskGenerator(
         model=sam2,
         points_per_side=64,  # 为什么由32改成64？如果不改，则exp2中的异物无法分割。
-        points_per_batch=128,
+        points_per_batch=128,  # 修改为265或64，分割时间影响不大。
         pred_iou_thresh=0.8,
         stability_score_thresh=0.9,
         stability_score_offset=0.9,
-        crop_n_layers=1,
+        crop_n_layers=1,  # 如果改为0，exp1中只能识别出6/7个异常物。
         box_nms_thresh=0.5,  # 能够在很大程度上避免多个掩码重叠在一起的情况。
         crop_n_points_downscale_factor=2,
         min_mask_region_area=25,
-        use_m2m=False  # 改成False，时间从15秒降低至7秒，且三个实验结果全对。
+        use_m2m=False,  # 改成False，时间从15秒降低至7秒，且三个实验结果全对。
+        multimask_output=True  # 如果改为False，exp1中只能识别出5/7个异常物。
     )
     print('开始分割')
 
@@ -183,7 +184,7 @@ def track(masks, video_dir, output_dir):
 
 def main():
     # 设置图像路径
-    video_dir = '/home/suma/PycharmProjects/sam2/exp3'
+    video_dir = '/home/suma/PycharmProjects/abnormal_tracking/exp1'
     output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
 
     # 把图像缩放至(1024, 410)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
