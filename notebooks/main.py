@@ -184,10 +184,10 @@ def track(masks, video_dir, output_dir):
 
 def main():
     # 设置图像路径
-    video_dir = '/home/suma/PycharmProjects/abnormal_tracking/exp1'
+    video_dir = '../dataset/exp5'
     output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
 
-    # 把图像缩放至(1024, 410)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
+    # 把图像缩放至(1662, 682)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
     # 必须进行缩放，否则会爆显存。
     original_images = sorted(glob.glob(os.path.join(video_dir, 'original_images/*.jpg')))
     for original_image_path in original_images:

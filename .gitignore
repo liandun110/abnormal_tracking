@@ -1,5 +1,7 @@
 .idea/
 .vscode/
+dataset/exp*/outputs/
+dataset/exp*/*.jpg
 .DS_Store
 __pycache__/
 *-checkpoint.ipynb
