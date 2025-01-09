@@ -204,6 +204,7 @@ def main():
     # 跟踪
     track(masks, video_dir, output_dir)
 
+
 if __name__ == '__main__':
     torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
     torch.backends.cuda.matmul.allow_tf32 = True
