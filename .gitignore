@@ -1,5 +1,7 @@
 .idea/
 .vscode/
+notebooks/xfeat/
+notebooks/image_align.py
 dataset/exp*/outputs/
 dataset/exp*/*.jpg
 .DS_Store
