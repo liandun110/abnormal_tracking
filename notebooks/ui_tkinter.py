@@ -1,13 +1,53 @@
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-import numpy as np
 import os
 from notebooks.main import abnormal_tracking
+
+import Demo
+import Ice
+import sys
+import threading
+# 全局变量
+plate_number = None
+
+class ImageTransferI(Demo.ImageTransfer):
+    def __init__(self, condition):
+        self.condition = condition
+
+    def printString(self, s, current=None):
+        global plate_number
+        plate_number = s  # 更新全局变量
+        print(f"Received plate number: {plate_number}")
+        with self.condition:
+            self.condition.notify()  # 通知等待线程
+
+# 创建条件变量
+condition = threading.Condition()
+
+# 初始化 Ice 通信
+with Ice.initialize(sys.argv) as communicator:
+    adapter = communicator.createObjectAdapterWithEndpoints("SimplePrinterAdapter", "default -p 10000")
+    object = ImageTransferI(condition)
+    adapter.add(object, communicator.stringToIdentity("SimplePrinter"))
+    adapter.activate()
+    print("Server is running... Waiting for data.")
+
+    with condition:
+        condition.wait()  # 等待条件变量被通知
+        print("Plate number received. Shutting down...")
+
+# 继续执行后续操作，例如弹出窗口
+print("继续执行后续操作...")
+
 # 图像处理函数
-def process_images(img1_path):
+def process_images(query_img_path, ref_img_path):
+    """
+    query_img_path: 现场采集的车底图像
+    ref_img_path: 历史车底图像
+    """
     # 假设 abnormal_tracking 返回三个图像的路径
-    img3_path, img4_path, img5_path = abnormal_tracking(img1_path)
+    img3_path, img4_path, img5_path = abnormal_tracking(query_img_path, ref_img_path)
     return img3_path, img4_path, img5_path
 
 # 创建应用窗口
@@ -28,11 +68,19 @@ tab_control.add(tab3, text="Tab 3: 展示 img4 和 img5")
 tab_control.pack(expand=1, fill="both")
 
 # 初始化图像路径变量
-img1_path = None
-img2_path = None
-img3_path = None
-img4_path = None
-img5_path = None
+img1_path = plate_number
+plate_number_base = os.path.basename(plate_number)
+plate_number_id = plate_number_base.split('_')[0]
+gallery_dir = "/home/suma/PycharmProjects/abnormal_tracking/dataset/gallery"
+for filename in os.listdir(gallery_dir):
+    if filename.startswith(plate_number_id):
+        img2_path = os.path.join(gallery_dir, filename)
+        print(f"匹配的图像路径: {img2_path}")
+        break
+else:
+    print(f"未找到匹配的图像路径，ID: {plate_number_id}")
+
+
 
 # 更新标签显示图像
 def update_image_label(image_path, label):
@@ -46,19 +94,19 @@ def update_image_label(image_path, label):
 # 读取并展示图片
 def load_image1():
     global img1_path
-    img1_path = '/home/suma/PycharmProjects/abnormal_tracking/dataset/exp10/original_images/00001.jpg'
+    img1_path = img1_path
     update_image_label(img1_path, img1_label)
 
 def load_image2():
     global img2_path
-    img2_path = '/home/suma/PycharmProjects/abnormal_tracking/dataset/exp10/original_images/00002.jpg'
+    img2_path = img2_path
     update_image_label(img2_path, img2_label)
 
 # 处理图片并生成img3, img4, img5
 def process_and_switch_tab():
     global img1_path, img2_path, img3_path, img4_path, img5_path
     if img1_path and img2_path:
-        img3_path, img4_path, img5_path = process_images(img1_path)
+        img3_path, img4_path, img5_path = process_images(img1_path, img2_path)
         update_image_label(img3_path, img3_label)
         tab_control.select(tab2)  # 切换到Tab2
     else:

@@ -110,10 +110,11 @@ def img_seg(query_img, output_dir):
 
 def track(masks, video_dir, output_dir):
     os.makedirs(output_dir, exist_ok=True)
-    frame_names = sorted([
-        p for p in os.listdir(video_dir)
-        if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
-    ])
+    # frame_names = sorted([
+    #     p for p in os.listdir(video_dir)
+    #     if os.path.splitext(p)[-1] in [".jpg", ".jpeg", ".JPG", ".JPEG"]
+    # ])
+    frame_names=(['00001.jpg','00002.jpg'])
     sam2_checkpoint = "/home/suma/pycharmprojects/sam2/checkpoints/sam2.1_hiera_large.pt"
     model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
     predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
@@ -194,18 +195,24 @@ def track(masks, video_dir, output_dir):
         plt.close()
 
 
-def abnormal_tracking(img1_path):
+def abnormal_tracking(query_img_path, ref_img_path):
+    """
+    query_img_path: 现场采集的车底图像
+    ref_img_path: 历史车底图像
+    """
     # 设置图像路径
     #video_dir = '../dataset/exp5'
-    video_dir = os.path.dirname(os.path.dirname(img1_path))
+    video_dir = os.path.dirname(os.path.dirname(query_img_path))
     output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
 
     # 把图像缩放至(1662, 682)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
     # 必须进行缩放，否则会爆显存。
     #original_images = sorted(glob.glob(os.path.join(video_dir, 'original_images/*.jpg')))
-    original_images = sorted(glob.glob(os.path.join(os.path.dirname(img1_path), '*.jpg')))
+    #original_images = sorted(glob.glob(os.path.join(os.path.dirname(img1_path), '*.jpg')))
+    original_images = [query_img_path, ref_img_path]
     for original_image_path in original_images:
-        image_name = original_image_path.split('/')[-1]
+        #image_name = original_image_path.split('/')[-1]
+        image_name = '00001.jpg' if original_image_path==query_img_path else '00002.jpg'
         image = Image.open(original_image_path)
         scaled_image = image.resize((1662, 682))
         save_image_path = os.path.join(video_dir, image_name)
