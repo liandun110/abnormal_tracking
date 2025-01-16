@@ -10,7 +10,7 @@ from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from sam2.build_sam import build_sam2_video_predictor
 
-
+device = torch.device("cuda")
 def show_img_mask(anns, original_image, output_dir, borders=True):
     if len(anns) == 0:
         return
@@ -181,15 +181,29 @@ def track(masks, video_dir, output_dir):
     diff_objs = set(query_obj) - set(reference_obj)
     print(diff_objs)
 
+    for out_frame_idx in range(len(frame_names)-1):  # 遍历所有帧
+        output_path = os.path.join(output_dir, f'diff_objs_frame.png')
+        plt.figure(figsize=(6, 4))
+        plt.imshow(Image.open(os.path.join(video_dir, frame_names[out_frame_idx])))
+        for out_obj_id in diff_objs:
+            if out_obj_id in video_segments[out_frame_idx]:
+                out_mask = video_segments[out_frame_idx][out_obj_id]
+                show_mask(out_mask, plt.gca(), obj_id=out_obj_id)
+        plt.axis('off')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
 
-def main():
+
+def abnormal_tracking(img1_path):
     # 设置图像路径
-    video_dir = '../dataset/exp5'
+    #video_dir = '../dataset/exp5'
+    video_dir = os.path.dirname(os.path.dirname(img1_path))
     output_dir = os.path.join(video_dir, 'outputs/img_seg_result')
 
     # 把图像缩放至(1662, 682)。因为常见轿车长宽比为2.5:1。缩放后覆盖原始图像文件（这样能避免图像分割和视频追踪代码读入图像尺寸不一致的问题），必须实时保存。
     # 必须进行缩放，否则会爆显存。
-    original_images = sorted(glob.glob(os.path.join(video_dir, 'original_images/*.jpg')))
+    #original_images = sorted(glob.glob(os.path.join(video_dir, 'original_images/*.jpg')))
+    original_images = sorted(glob.glob(os.path.join(os.path.dirname(img1_path), '*.jpg')))
     for original_image_path in original_images:
         image_name = original_image_path.split('/')[-1]
         image = Image.open(original_image_path)
@@ -204,10 +218,18 @@ def main():
     # 跟踪
     track(masks, video_dir, output_dir)
 
+    # img3_path: 仅显示异物mask的现场车底图像。
+    # img4_path: 显示所有分割物的现场车底图像。
+    # img5_path: 显示所有分割物的历史车底图像。
+    img3_path = output_dir+'/diff_objs_frame.png'
+    img4_path = output_dir+'/frame_0000.png'
+    img5_path = output_dir+'/frame_0001.png'
+    return img3_path, img4_path, img5_path
+
 
 if __name__ == '__main__':
     torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    device = torch.device("cuda")
-    main()
+    img1_path = '/home/suma/PycharmProjects/abnormal_tracking/dataset/exp10/original_images/00001.jpg'
+    abnormal_tracking(img1_path)
