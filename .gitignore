@@ -1,7 +1,5 @@
 .idea/
 .vscode/
-notebooks/xfeat/
-notebooks/image_align.py
 notebooks/ImageTransfer_ice.py
 notebooks/Demo/
 dataset/exp*/outputs/
